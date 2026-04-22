@@ -25,7 +25,7 @@ router.get("/getAll", async (req, res) => {
   }
 });
 
-router.get("/getallapitarefaszayon254870", async (req, res) => {
+router.get("/getallapitarefaszayon254870pedroalves253206", async (req, res) => {
   try {
     const resultados = await modeloTarefa.find();
     res.json(resultados);
