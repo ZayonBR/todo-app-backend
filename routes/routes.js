@@ -16,7 +16,22 @@ router.post("/post", async (req, res) => {
   }
 });
 
+// ----------------------------------------------------
+// ROTA ORIGINAL: Mantém o seu site Angular funcionando perfeitamente
+// ----------------------------------------------------
 router.get("/getAll", async (req, res) => {
+  try {
+    const resultados = await modeloTarefa.find();
+    res.json(resultados);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ----------------------------------------------------
+// NOVA ROTA VIP: Criada exclusivamente para o print da faculdade
+// ----------------------------------------------------
+router.get("/getallapitarefaszayon254870pedroalves253206", async (req, res) => {
   try {
     const resultados = await modeloTarefa.find();
     res.json(resultados);
@@ -39,13 +54,4 @@ router.patch("/update/:id", async (req, res) => {
     const id = req.params.id;
     const novaTarefa = req.body;
     const options = { new: true };
-    const result = await modeloTarefa.findByIdAndUpdate(
-      id,
-      novaTarefa,
-      options,
-    );
-    res.json(result);
-  } catch (error) {
-    res.status(400).json({ message: error.message });
-  }
-});
+    const result = await modelo
