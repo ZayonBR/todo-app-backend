@@ -1,8 +1,7 @@
 const express = require('express');
-const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
-const router = express.Router()
-module.exports = router;
+const router = express.Router();
+
 const modeloTarefa = require('../models/tarefa');
 const Usuario = require('../models/usuario');
 
@@ -13,6 +12,18 @@ function verificaADM(req, res, next) {
     if (err || decoded.role !== 'adm') {
       return res.status(403).json({ message: 'Acesso restrito a administradores' });
     }
+    next();
+  });
+}
+
+// Middleware para verificar se o usuário está logado
+function verificaJWT(req, res, next) {
+  const token = req.headers['id-token'];
+  if (!token) return res.status(401).json({ auth: false, message: 'Token não fornecido' });
+
+  jwt.verify(token, 'segredo', function (err, decoded) {
+    if (err) return res.status(500).json({ auth: false, message: 'Falha na autenticação do token!' });
+    req.usuarioId = decoded.id;
     next();
   });
 }
@@ -37,17 +48,16 @@ router.delete('/usuario/:id', verificaADM, async (req, res) => {
   res.json({ message: 'Usuário removido' });
 });
 
-// Atualizar usuário (Apenas ADM)
+// Atualizar usuário (Apenas ADM) - SEM CRIPTOGRAFIA
 router.patch('/usuario/:id', verificaADM, async (req, res) => {
   try {
     const updateData = { ...req.body };
-    if (updateData.senha) {
-      const salt = crypto.randomBytes(16).toString('hex');
-      const hash = crypto.scryptSync(updateData.senha, salt, 64).toString('hex');
-      updateData.senha = `${salt}:${hash}`;
-    } else {
-      delete updateData.senha; // Previne atualizar senha para vazia
+    
+    // Se a senha foi enviada vazia, remove para não substituir no banco
+    if (!updateData.senha) {
+      delete updateData.senha; 
     }
+
     const result = await Usuario.findByIdAndUpdate(req.params.id, updateData, { new: true });
     res.json(result);
   } catch (error) {
@@ -55,20 +65,17 @@ router.patch('/usuario/:id', verificaADM, async (req, res) => {
   }
 });
 
-// ROTA DE REGISTRO
+// ROTA DE REGISTRO - SEM CRIPTOGRAFIA
 router.post('/register', async (req, res) => {
   try {
     const { nome, senha, role } = req.body;
-    const salt = crypto.randomBytes(16).toString('hex');
-    const hash = crypto.scryptSync(senha, salt, 64).toString('hex');
-    const senhaHash = `${salt}:${hash}`;
 
     const totalUsuarios = await Usuario.countDocuments();
     const roleDefinida = totalUsuarios === 0 ? 'adm' : (role || 'user');
 
     const novoUsuario = new Usuario({
       nome,
-      senha: senhaHash,
+      senha, // Salvando a senha em texto puro
       role: roleDefinida
     });
 
@@ -79,19 +86,16 @@ router.post('/register', async (req, res) => {
   }
 });
 
+// ROTA DE LOGIN - SEM CRIPTOGRAFIA
 router.post('/login', async (req, res) => {
   try {
     const usuario = await Usuario.findOne({ nome: req.body.nome });
     if (!usuario) return res.status(401).json({ message: 'Usuário não encontrado' });
 
-    let senhaValida = false;
-    if (usuario.senha && usuario.senha.includes(':')) {
-      const [salt, hash] = usuario.senha.split(':');
-      const hashVerificar = crypto.scryptSync(req.body.senha, salt, 64).toString('hex');
-      senhaValida = hash === hashVerificar;
+    // Comparação direta da senha em texto puro
+    if (usuario.senha !== req.body.senha) {
+      return res.status(401).json({ message: 'Senha incorreta' });
     }
-
-    if (!senhaValida) return res.status(401).json({ message: 'Senha incorreta' });
 
     const token = jwt.sign(
       { id: usuario._id, role: usuario.role },
@@ -109,22 +113,13 @@ router.post('/login', async (req, res) => {
   }
 });
 
-function verificaJWT(req, res, next) {
-  const token = req.headers['id-token'];
-  if (!token) return res.status(401).json({ auth: false, message: 'Token nao fornecido' });
 
-  jwt.verify(token, 'segredo', function (err, decoded) {
-    if (err) return res.status(500).json({ auth: false, message: 'Falha !' });
-    req.usuarioId = decoded.id;
-    next();
-  });
-}
-
+// ROTA PARA CRIAR TAREFA
 router.post('/post', verificaJWT, async (req, res) => {
   const objetoTarefa = new modeloTarefa({
     descricao: req.body.descricao,
     statusRealizada: req.body.statusRealizada,
-    owner: req.usuarioId,
+    owner: req.usuarioId, // Mantemos o owner apenas para saber quem criou
     prioridade: req.body.prioridade || 'Baixa',
     subTarefas: req.body.subTarefas || []
   });
@@ -136,31 +131,34 @@ router.post('/post', verificaJWT, async (req, res) => {
   }
 });
 
+// ROTA PARA BUSCAR TODAS AS TAREFAS (VISÍVEL PARA TODOS)
 router.get('/getAll', verificaJWT, async (req, res) => {
   try {
-    const resultados = await modeloTarefa.find({ owner: req.usuarioId });
+    // Retirado o filtro { owner: req.usuarioId }
+    const resultados = await modeloTarefa.find({});
     res.json(resultados);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
+// ROTA PARA DELETAR TAREFA (QUALQUER UM PODE DELETAR)
 router.delete('/delete/:id', verificaJWT, async (req, res) => {
   try {
-    const resultado = await modeloTarefa.findOneAndDelete({
-      _id: req.params.id,
-      owner: req.usuarioId
-    });
+    // Usando findByIdAndDelete para não exigir que o usuário seja o dono
+    const resultado = await modeloTarefa.findByIdAndDelete(req.params.id);
     res.json(resultado);
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
 });
 
+// ROTA PARA ATUALIZAR TAREFA (QUALQUER UM PODE EDITAR)
 router.patch('/update/:id', verificaJWT, async (req, res) => {
   try {
-    const result = await modeloTarefa.findOneAndUpdate(
-      { _id: req.params.id, owner: req.usuarioId },
+    // Usando findByIdAndUpdate para não exigir que o usuário seja o dono
+    const result = await modeloTarefa.findByIdAndUpdate(
+      req.params.id,
       req.body,
       { new: true }
     );
@@ -170,6 +168,7 @@ router.patch('/update/:id', verificaJWT, async (req, res) => {
   }
 });
 
+// PROMOVER USUÁRIO (Apenas ADM)
 router.patch('/usuario/promover/:id', verificaADM, async (req, res) => {
   try {
     const result = await Usuario.findByIdAndUpdate(
@@ -183,3 +182,5 @@ router.patch('/usuario/promover/:id', verificaADM, async (req, res) => {
     res.status(400).json({ message: error.message });
   }
 });
+
+module.exports = router;
